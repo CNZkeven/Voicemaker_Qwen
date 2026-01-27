@@ -1,0 +1,16 @@
+# ignore build artifacts
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+.venv/
+venv/
+ENV/
+*.spec
+.DS_Store
+Thumbs.db
+.idea/
