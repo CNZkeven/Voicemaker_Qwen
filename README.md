@@ -47,10 +47,6 @@ Ensure your use of this application complies with all applicable laws and regula
 
 Your DASHSCOPE_API_KEY is a sensitive credential. Never expose it publicly, share it, or commit it to version control. It is strongly recommended to set it via environment variables (e.g., using setx on Windows or .env files) rather than hardcoding it in source files.
 
-## No Commercial Use Without Authorization
-
-This project does not grant any commercial license. Any use of the application or its generated audio for commercial purposes (e.g., advertising, customer service bots, monetized audiobooks, etc.) is strictly prohibited unless you have obtained proper legal permissions from all relevant rights holders and service providers (e.g., Tongyi Lab / DashScope).
-
 ## Technical Limitations
 
 The real-time TTS output is wrapped in WAV format (from PCM) for browser playback compatibility. Audio quality, naturalness, and language support depend on the backend model (see default settings in app.py) and do not represent a production-grade service.
@@ -62,5 +58,6 @@ The developers assume no responsibility for any legal disputes, privacy violatio
 ✅ Recommendation: Only run this application in controlled experimental environments or scenarios where you have obtained clear authorization. Always respect individuals’ voice rights and promote the ethical use of AI.
 
 ## — For learning and non-commercial exchange only. Unauthorized, illegal, or unethical use is strictly prohibited. —
+
 
 
