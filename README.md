@@ -32,7 +32,7 @@ Open `http://localhost:8000`.
 - The app wraps realtime PCM output into WAV for browser playback.
 
 
-⚠️ Important Warnings and Usage Notice ⚠️
+## ⚠️ Important Warnings and Usage Notice ⚠️
 
 This project (Voicemaker, powered by Qwen) is intended strictly for educational, research, and technical exchange purposes. By using it, you agree to comply with the following terms:
 
@@ -59,3 +59,4 @@ The developers assume no responsibility for any legal disputes, privacy violatio
 ✅ Recommendation: Only run this application in controlled experimental environments or scenarios where you have obtained clear authorization. Always respect individuals’ voice rights and promote the ethical use of AI.
 
 — For learning and non-commercial exchange only. Unauthorized, illegal, or unethical use is strictly prohibited. —
+
