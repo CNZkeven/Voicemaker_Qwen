@@ -1,4 +1,4 @@
-# Qwen Voice Studio
+# Voicemaker（Powered by Qwen）
 
 A small full-stack Python app for creating a custom voice (design or enrollment) and running realtime TTS. The frontend is iOS-inspired with gradients and scale animations.
 
@@ -30,3 +30,4 @@ Open `http://localhost:8000`.
 - You can also paste the API key in the UI (useful for quick testing).
 - Default models and sample rate are in `app.py`.
 - The app wraps realtime PCM output into WAV for browser playback.
+
