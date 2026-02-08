@@ -5,6 +5,10 @@ const enrollTtsBtn = document.getElementById("enrollTtsBtn");
 
 let designVoice = "";
 let enrollVoice = "";
+const progressState = {
+  design: null,
+  enroll: null,
+};
 
 function getApiKey() {
   return document.getElementById("apiKey").value.trim();
@@ -14,6 +18,78 @@ function setStatus(elementId, message, isError = false) {
   const el = document.getElementById(elementId);
   el.textContent = message;
   el.style.color = isError ? "#b42318" : "#5b6b85";
+}
+
+function getErrorMessage(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error || "请求失败");
+}
+
+function getProgressElements(scope) {
+  return {
+    wrap: document.getElementById(`${scope}ProgressWrap`),
+    bar: document.getElementById(`${scope}ProgressBar`),
+    text: document.getElementById(`${scope}ProgressText`),
+  };
+}
+
+function renderProgress(scope, value) {
+  const { wrap, bar, text } = getProgressElements(scope);
+  const bounded = Math.max(0, Math.min(100, Math.floor(value)));
+  wrap.classList.remove("hidden");
+  bar.style.width = `${bounded}%`;
+  text.textContent = `${bounded}%`;
+}
+
+function beginProgress(scope, statusElementId, actionText) {
+  const previous = progressState[scope];
+  if (previous && previous.timer) {
+    clearInterval(previous.timer);
+  }
+
+  const state = {
+    value: 0,
+    timer: null,
+  };
+  progressState[scope] = state;
+
+  renderProgress(scope, 0);
+  setStatus(statusElementId, `${actionText} 0%`);
+
+  state.timer = setInterval(() => {
+    if (progressState[scope] !== state) {
+      clearInterval(state.timer);
+      return;
+    }
+    if (state.value >= 92) {
+      return;
+    }
+
+    const step = state.value < 60 ? Math.random() * 5 + 2 : Math.random() * 2 + 1;
+    state.value = Math.min(92, state.value + step);
+    renderProgress(scope, state.value);
+    setStatus(statusElementId, `${actionText} ${Math.floor(state.value)}%`);
+  }, 220);
+
+  return {
+    complete(message) {
+      if (progressState[scope] !== state) {
+        return;
+      }
+      clearInterval(state.timer);
+      renderProgress(scope, 100);
+      setStatus(statusElementId, `${message}（100%）`);
+    },
+    fail(message) {
+      if (progressState[scope] !== state) {
+        return;
+      }
+      clearInterval(state.timer);
+      setStatus(statusElementId, message, true);
+    },
+  };
 }
 
 async function postJson(url, body) {
@@ -63,8 +139,9 @@ function setAudioPlayer(playerId, base64, mimeType) {
 }
 
 async function handleDesignCreate() {
-  setStatus("designStatus", "正在生成音色...");
+  const progress = beginProgress("design", "designStatus", "正在生成音色...");
   designCreateBtn.disabled = true;
+  designTtsBtn.disabled = true;
 
   try {
     const payload = {
@@ -87,17 +164,19 @@ async function handleDesignCreate() {
       setAudioPlayer("designPreviewPlayer", data.preview_audio_base64, mimeType);
     }
 
-    setStatus("designStatus", "音色已生成。");
+    progress.complete("音色已生成。");
   } catch (error) {
-    setStatus("designStatus", error.message, true);
+    progress.fail(getErrorMessage(error));
   } finally {
     designCreateBtn.disabled = false;
+    designTtsBtn.disabled = false;
   }
 }
 
 async function handleDesignTts() {
-  setStatus("designStatus", "正在合成...");
+  const progress = beginProgress("design", "designStatus", "正在合成...");
   designTtsBtn.disabled = true;
+  designCreateBtn.disabled = true;
 
   try {
     const payload = {
@@ -112,17 +191,19 @@ async function handleDesignTts() {
     const data = await postJson("/api/tts", payload);
     setAudioPlayer("designTtsPlayer", data.audio_base64, data.mime_type);
 
-    setStatus("designStatus", "合成完成。");
+    progress.complete("合成完成。");
   } catch (error) {
-    setStatus("designStatus", error.message, true);
+    progress.fail(getErrorMessage(error));
   } finally {
     designTtsBtn.disabled = false;
+    designCreateBtn.disabled = false;
   }
 }
 
 async function handleEnrollCreate() {
-  setStatus("enrollStatus", "正在上传并创建音色...");
+  const progress = beginProgress("enroll", "enrollStatus", "正在上传并创建音色...");
   enrollCreateBtn.disabled = true;
+  enrollTtsBtn.disabled = true;
 
   try {
     const fileInput = document.getElementById("enrollAudio");
@@ -141,17 +222,19 @@ async function handleEnrollCreate() {
     enrollVoice = data.voice;
     document.getElementById("enrollVoiceName").textContent = enrollVoice || "-";
 
-    setStatus("enrollStatus", "音色已创建。");
+    progress.complete("音色已创建。");
   } catch (error) {
-    setStatus("enrollStatus", error.message, true);
+    progress.fail(getErrorMessage(error));
   } finally {
     enrollCreateBtn.disabled = false;
+    enrollTtsBtn.disabled = false;
   }
 }
 
 async function handleEnrollTts() {
-  setStatus("enrollStatus", "正在合成...");
+  const progress = beginProgress("enroll", "enrollStatus", "正在合成...");
   enrollTtsBtn.disabled = true;
+  enrollCreateBtn.disabled = true;
 
   try {
     const payload = {
@@ -166,11 +249,12 @@ async function handleEnrollTts() {
     const data = await postJson("/api/tts", payload);
     setAudioPlayer("enrollTtsPlayer", data.audio_base64, data.mime_type);
 
-    setStatus("enrollStatus", "合成完成。");
+    progress.complete("合成完成。");
   } catch (error) {
-    setStatus("enrollStatus", error.message, true);
+    progress.fail(getErrorMessage(error));
   } finally {
     enrollTtsBtn.disabled = false;
+    enrollCreateBtn.disabled = false;
   }
 }
 

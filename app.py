@@ -3,6 +3,7 @@ import io
 import os
 import sys
 import threading
+import time
 import wave
 import webbrowser
 from typing import Optional, Tuple
@@ -61,6 +62,13 @@ def dashscope_headers(api_key: str) -> dict:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+
+
+def ensure_preferred_name(preferred_name: str, prefix: str) -> str:
+    name = (preferred_name or "").strip()
+    if name:
+        return name
+    return f"{prefix}_{int(time.time() * 1000)}"
 
 
 def create_voice_design(
@@ -226,7 +234,7 @@ def api_design_voice():
 
     voice_prompt = (payload.get("voice_prompt") or "").strip()
     preview_text = (payload.get("preview_text") or "").strip()
-    preferred_name = (payload.get("preferred_name") or "").strip()
+    preferred_name = ensure_preferred_name(payload.get("preferred_name"), "design_voice")
     language = (payload.get("language") or "zh").strip()
     target_model = (payload.get("target_model") or DEFAULT_DESIGN_MODEL).strip()
     sample_rate = int(payload.get("sample_rate") or DEFAULT_SAMPLE_RATE)
@@ -237,20 +245,24 @@ def api_design_voice():
     if not preview_text:
         return jsonify({"error": "必须填写预览文本（preview_text）"}), 400
 
-    voice_name, preview_audio = create_voice_design(
-        api_key=api_key,
-        voice_prompt=voice_prompt,
-        preview_text=preview_text,
-        preferred_name=preferred_name,
-        language=language,
-        target_model=target_model,
-        sample_rate=sample_rate,
-        response_format=response_format,
-    )
+    try:
+        voice_name, preview_audio = create_voice_design(
+            api_key=api_key,
+            voice_prompt=voice_prompt,
+            preview_text=preview_text,
+            preferred_name=preferred_name,
+            language=language,
+            target_model=target_model,
+            sample_rate=sample_rate,
+            response_format=response_format,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     return jsonify(
         {
             "voice": voice_name,
+            "preferred_name": preferred_name,
             "preview_audio_base64": preview_audio,
             "preview_audio_format": response_format,
         }
@@ -269,18 +281,21 @@ def api_enroll_voice():
 
     audio_bytes = file.read()
     audio_mime_type = (request.form.get("audio_mime_type") or file.mimetype or "audio/mpeg").strip()
-    preferred_name = (request.form.get("preferred_name") or "").strip()
+    preferred_name = ensure_preferred_name(request.form.get("preferred_name"), "enroll_voice")
     target_model = (request.form.get("target_model") or DEFAULT_ENROLL_MODEL).strip()
 
-    voice_name = create_voice_enrollment(
-        api_key=api_key,
-        audio_bytes=audio_bytes,
-        audio_mime_type=audio_mime_type,
-        preferred_name=preferred_name,
-        target_model=target_model,
-    )
+    try:
+        voice_name = create_voice_enrollment(
+            api_key=api_key,
+            audio_bytes=audio_bytes,
+            audio_mime_type=audio_mime_type,
+            preferred_name=preferred_name,
+            target_model=target_model,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"voice": voice_name})
+    return jsonify({"voice": voice_name, "preferred_name": preferred_name})
 
 
 @app.post("/api/tts")

@@ -73,6 +73,12 @@
 
           <div class="output">
             <div class="status" id="designStatus">空闲</div>
+            <div class="progress-wrap hidden" id="designProgressWrap">
+              <div class="progress-track">
+                <div class="progress-fill" id="designProgressBar"></div>
+              </div>
+              <div class="progress-text" id="designProgressText">0%</div>
+            </div>
             <div class="result-row">
               <span>音色名称</span>
               <strong id="designVoiceName">-</strong>
@@ -100,6 +106,7 @@
           <div class="field">
             <label for="enrollAudio">上传音频（≥5秒）</label>
             <input id="enrollAudio" type="file" accept="audio/*" />
+            <p class="hint">建议使用不超过20秒的音频。</p>
           </div>
 
           <div class="field-grid">
@@ -122,6 +129,12 @@
 
           <div class="output">
             <div class="status" id="enrollStatus">空闲</div>
+            <div class="progress-wrap hidden" id="enrollProgressWrap">
+              <div class="progress-track">
+                <div class="progress-fill" id="enrollProgressBar"></div>
+              </div>
+              <div class="progress-text" id="enrollProgressText">0%</div>
+            </div>
             <div class="result-row">
               <span>音色名称</span>
               <strong id="enrollVoiceName">-</strong>
