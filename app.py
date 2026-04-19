@@ -28,8 +28,10 @@ DEFAULT_DESIGN_MODEL = "qwen3-tts-vd-realtime-2025-12-16"
 DEFAULT_ENROLL_MODEL = "qwen3-tts-vc-realtime-2026-01-15"
 DEFAULT_SAMPLE_RATE = 24000
 DEFAULT_RESPONSE_FORMAT = "wav"
+SPEECH_RATE_MIN = 0.5
+SPEECH_RATE_MAX = 2.0
 
-API_KEY_ENV = "your-key"
+API_KEY_ENV = "DASHSCOPE_API_KEY"
 
 def resource_path(relative_path: str) -> str:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -44,6 +46,12 @@ app = Flask(
     template_folder=resource_path("templates"),
     static_folder=resource_path("static"),
 )
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+
+
+@app.errorhandler(413)
+def _too_large(_exc):
+    return jsonify({"error": "上传文件过大（限制 25MB）。"}), 413
 
 AUDIO_FORMAT_BY_RATE = {
     24000: AudioFormat.PCM_24000HZ_MONO_16BIT,
@@ -51,10 +59,12 @@ AUDIO_FORMAT_BY_RATE = {
 
 
 def resolve_api_key(inbound_key: Optional[str]) -> str:
-    env_key = os.getenv(API_KEY_ENV, "").strip()
-    if env_key:
-        return env_key
-    return (inbound_key or "").strip()
+    # UI input wins; env var is only the fallback so a stale
+    # DASHSCOPE_API_KEY never silently overrides what the user typed.
+    user_key = (inbound_key or "").strip()
+    if user_key:
+        return user_key
+    return os.getenv(API_KEY_ENV, "").strip()
 
 
 def dashscope_headers(api_key: str) -> dict:
@@ -165,12 +175,17 @@ class CollectingCallback(QwenTtsRealtimeCallback):
                 self.audio_bytes.extend(chunk)
             elif event_type in ("response.done", "session.finished"):
                 self.complete_event.set()
+            elif event_type == "error":
+                err = response.get("error") or {}
+                message = err.get("message") if isinstance(err, dict) else str(err)
+                self.last_error = RuntimeError(message or "Realtime server reported an error")
+                self.complete_event.set()
         except Exception as exc:
             self.last_error = exc
             self.complete_event.set()
 
-    def wait_for_finished(self, timeout: int = 60) -> None:
-        self.complete_event.wait(timeout=timeout)
+    def wait_for_finished(self, timeout: int = 60) -> bool:
+        return self.complete_event.wait(timeout=timeout)
 
 
 def synthesize_realtime(
@@ -179,35 +194,83 @@ def synthesize_realtime(
     voice: str,
     text: str,
     sample_rate: int,
+    instructions: Optional[str] = None,
+    optimize_instructions: Optional[bool] = None,
+    speech_rate: Optional[float] = None,
 ) -> bytes:
     dashscope.api_key = api_key
 
     audio_format = AUDIO_FORMAT_BY_RATE.get(sample_rate)
     if audio_format is None:
+        supported = ", ".join(str(r) for r in sorted(AUDIO_FORMAT_BY_RATE))
+        raise RuntimeError(f"不支持的采样率 {sample_rate}，当前支持：{supported}")
+
+    # SDK hardcodes a 5s WS-handshake timeout; retry a few times so transient
+    # network hiccups don't surface as an error to the user.
+    max_attempts = 3
+    last_error: Optional[Exception] = None
+    client: Optional[QwenTtsRealtime] = None
+    callback: Optional[CollectingCallback] = None
+    for attempt in range(1, max_attempts + 1):
+        callback = CollectingCallback()
+        client = QwenTtsRealtime(model=model, callback=callback, url=DASHSCOPE_WSS_URL)
+        try:
+            client.connect()
+            break
+        except TimeoutError as exc:
+            last_error = exc
+            try:
+                client.close()
+            except Exception:
+                pass
+            client = None
+            if attempt < max_attempts:
+                time.sleep(0.6)
+        except Exception as exc:
+            try:
+                client.close()
+            except Exception:
+                pass
+            raise RuntimeError(f"连接 DashScope 实时服务失败：{exc}") from exc
+
+    if client is None:
         raise RuntimeError(
-            f"Unsupported sample_rate {sample_rate}. Update AUDIO_FORMAT_BY_RATE to add new formats."
+            "连接 DashScope 实时服务多次超时（每次 5 秒）。"
+            "请检查网络/代理/防火墙，或确认 API Key 是否有效。"
+            f" 最后一次错误：{last_error}"
         )
 
-    callback = CollectingCallback()
-    client = QwenTtsRealtime(model=model, callback=callback, url=DASHSCOPE_WSS_URL)
-    client.connect()
-    client.update_session(
-        voice=voice,
-        response_format=audio_format,
-        mode="server_commit",
-    )
-    client.append_text(text)
-    client.finish()
+    try:
+        session_kwargs = {
+            "voice": voice,
+            "response_format": audio_format,
+            "mode": "server_commit",
+        }
+        if instructions:
+            session_kwargs["instructions"] = instructions
+            if optimize_instructions is not None:
+                session_kwargs["optimize_instructions"] = bool(optimize_instructions)
+        if speech_rate is not None:
+            session_kwargs["speech_rate"] = float(speech_rate)
+        client.update_session(**session_kwargs)
+        client.append_text(text)
+        client.finish()
 
-    callback.wait_for_finished(timeout=60)
+        if not callback.wait_for_finished(timeout=120):
+            raise RuntimeError("实时合成超时，未在规定时间内收到完成事件。")
 
-    if callback.last_error:
-        raise RuntimeError(f"Realtime synthesis failed: {callback.last_error}")
+        if callback.last_error:
+            raise RuntimeError(f"Realtime synthesis failed: {callback.last_error}")
 
-    if not callback.audio_bytes:
-        raise RuntimeError("No audio data received from realtime synthesis")
+        if not callback.audio_bytes:
+            raise RuntimeError("未从实时合成接口收到音频数据。")
 
-    return bytes(callback.audio_bytes)
+        return bytes(callback.audio_bytes)
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
 
 
 def pcm_to_wav(pcm_bytes: bytes, sample_rate: int) -> bytes:
@@ -227,7 +290,7 @@ def index() -> str:
 
 @app.post("/api/design-voice")
 def api_design_voice():
-    payload = request.get_json(force=True)
+    payload = request.get_json(force=True, silent=True) or {}
     api_key = resolve_api_key(payload.get("api_key"))
     if not api_key:
         return jsonify({"error": f"缺少 API Key，请设置 {API_KEY_ENV} 或在页面中填写 api_key。"}), 400
@@ -237,7 +300,10 @@ def api_design_voice():
     preferred_name = ensure_preferred_name(payload.get("preferred_name"), "design_voice")
     language = (payload.get("language") or "zh").strip()
     target_model = (payload.get("target_model") or DEFAULT_DESIGN_MODEL).strip()
-    sample_rate = int(payload.get("sample_rate") or DEFAULT_SAMPLE_RATE)
+    try:
+        sample_rate = int(payload.get("sample_rate") or DEFAULT_SAMPLE_RATE)
+    except (TypeError, ValueError):
+        return jsonify({"error": "采样率必须是整数。"}), 400
     response_format = (payload.get("response_format") or DEFAULT_RESPONSE_FORMAT).strip()
 
     if not voice_prompt:
@@ -256,6 +322,8 @@ def api_design_voice():
             sample_rate=sample_rate,
             response_format=response_format,
         )
+    except requests.RequestException as exc:
+        return jsonify({"error": f"请求音色设计接口失败：{exc}"}), 502
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -292,6 +360,8 @@ def api_enroll_voice():
             preferred_name=preferred_name,
             target_model=target_model,
         )
+    except requests.RequestException as exc:
+        return jsonify({"error": f"请求音色复刻接口失败：{exc}"}), 502
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -300,7 +370,7 @@ def api_enroll_voice():
 
 @app.post("/api/tts")
 def api_tts():
-    payload = request.get_json(force=True)
+    payload = request.get_json(force=True, silent=True) or {}
     api_key = resolve_api_key(payload.get("api_key"))
     if not api_key:
         return jsonify({"error": f"缺少 API Key，请设置 {API_KEY_ENV} 或在页面中填写 api_key。"}), 400
@@ -308,21 +378,49 @@ def api_tts():
     voice = (payload.get("voice") or "").strip()
     text = (payload.get("text") or "").strip()
     model = (payload.get("model") or DEFAULT_DESIGN_MODEL).strip()
-    sample_rate = int(payload.get("sample_rate") or DEFAULT_SAMPLE_RATE)
+    try:
+        sample_rate = int(payload.get("sample_rate") or DEFAULT_SAMPLE_RATE)
+    except (TypeError, ValueError):
+        return jsonify({"error": "采样率必须是整数。"}), 400
     output_format = (payload.get("format") or "wav").strip().lower()
+    instructions = (payload.get("instructions") or "").strip() or None
+    raw_optimize = payload.get("optimize_instructions")
+    optimize_instructions = None if raw_optimize is None else bool(raw_optimize)
+
+    raw_speech_rate = payload.get("speech_rate")
+    speech_rate: Optional[float]
+    if raw_speech_rate is None or raw_speech_rate == "":
+        speech_rate = None
+    else:
+        try:
+            speech_rate = float(raw_speech_rate)
+        except (TypeError, ValueError):
+            return jsonify({"error": "语速必须是数字。"}), 400
+        if not (SPEECH_RATE_MIN <= speech_rate <= SPEECH_RATE_MAX):
+            return jsonify(
+                {"error": f"语速必须在 {SPEECH_RATE_MIN}~{SPEECH_RATE_MAX} 之间。"}
+            ), 400
 
     if not voice:
         return jsonify({"error": "必须填写音色名称（voice）"}), 400
     if not text:
         return jsonify({"error": "必须填写合成文本（text）"}), 400
 
-    pcm_audio = synthesize_realtime(
-        api_key=api_key,
-        model=model,
-        voice=voice,
-        text=text,
-        sample_rate=sample_rate,
-    )
+    try:
+        pcm_audio = synthesize_realtime(
+            api_key=api_key,
+            model=model,
+            voice=voice,
+            text=text,
+            sample_rate=sample_rate,
+            instructions=instructions,
+            optimize_instructions=optimize_instructions,
+            speech_rate=speech_rate,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"合成失败：{exc}"}), 500
 
     if output_format == "pcm":
         audio_bytes = pcm_audio
@@ -337,14 +435,25 @@ def api_tts():
 
 
 if __name__ == "__main__":
-    server_url = "http://127.0.0.1:8000"
+    host = os.environ.get("QWEN_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(os.environ.get("QWEN_PORT", "8000"))
+    except ValueError:
+        port = 8000
+    server_url = f"http://127.0.0.1:{port}"
+
+    debug_mode = os.environ.get("QWEN_DEBUG", "0") == "1" and not getattr(sys, "frozen", False)
+    if debug_mode and host != "127.0.0.1":
+        # Werkzeug's debugger allows arbitrary code execution — refuse to expose it on other hosts.
+        print(f"[warn] QWEN_DEBUG=1 is only allowed on 127.0.0.1 (host={host}); disabling debug.")
+        debug_mode = False
 
     if os.environ.get("QWEN_AUTO_OPEN", "1") != "0":
         threading.Timer(1.0, lambda: webbrowser.open(server_url)).start()
 
     app.run(
-        host="0.0.0.0",
-        port=8000,
-        debug=not getattr(sys, "frozen", False),
+        host=host,
+        port=port,
+        debug=debug_mode,
         use_reloader=False,
     )

@@ -57,7 +57,9 @@
             </div>
             <div class="field">
               <label for="designSampleRate">采样率</label>
-              <input id="designSampleRate" type="number" value="24000" />
+              <select id="designSampleRate">
+                <option value="24000" selected>24000 Hz</option>
+              </select>
             </div>
           </div>
 
@@ -93,7 +95,19 @@
             <input id="designTtsText" type="text" placeholder="输入要合成的文本" />
           </div>
 
-          <button class="secondary" id="designTtsBtn">用设计音色合成</button>
+          <div class="field speech-rate" data-scope="design">
+            <label for="designSpeechRate">语速</label>
+            <div class="speech-rate-row">
+              <input id="designSpeechRate" class="speech-rate-input" type="number" min="0.5" max="2.0" step="0.05" value="1.0" />
+              <span class="speech-rate-unit">x</span>
+              <button type="button" class="ghost speech-rate-preset" data-rate="0.75">0.75x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.0">1.0x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.25">1.25x</button>
+            </div>
+            <p class="hint">范围 0.5~2.0，不改变音高。</p>
+          </div>
+
+          <button class="secondary" id="designTtsBtn" disabled>用设计音色合成</button>
           <audio id="designTtsPlayer" controls></audio>
         </section>
 
@@ -148,16 +162,121 @@
             <input id="enrollTtsText" type="text" placeholder="输入要合成的文本" />
           </div>
 
-          <button class="secondary" id="enrollTtsBtn">用复刻音色合成</button>
+          <div class="field speech-rate" data-scope="enroll">
+            <label for="enrollSpeechRate">语速</label>
+            <div class="speech-rate-row">
+              <input id="enrollSpeechRate" class="speech-rate-input" type="number" min="0.5" max="2.0" step="0.05" value="1.0" />
+              <span class="speech-rate-unit">x</span>
+              <button type="button" class="ghost speech-rate-preset" data-rate="0.75">0.75x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.0">1.0x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.25">1.25x</button>
+            </div>
+            <p class="hint">范围 0.5~2.0，不改变音高。</p>
+          </div>
+
+          <button class="secondary" id="enrollTtsBtn" disabled>用复刻音色合成</button>
           <audio id="enrollTtsPlayer" controls></audio>
         </section>
+
+        <section class="card" id="presetCard">
+          <div class="card-header">
+            <h2>3. 预设音色 · 风格指令</h2>
+            <span class="pill">即选即合成</span>
+          </div>
+
+          <div class="field">
+            <label for="presetModel">目标模型</label>
+            <select id="presetModel"></select>
+            <p class="hint" id="presetModelHint"></p>
+          </div>
+
+          <div class="field">
+            <label for="presetVoice">选择音色</label>
+            <select id="presetVoice"></select>
+            <p class="hint" id="presetVoiceHint">先选择模型，再从对应支持的音色中挑选。</p>
+          </div>
+
+          <div class="field hidden" id="presetInstructionsField">
+            <label for="presetInstructions">风格指令（instructions）</label>
+            <textarea id="presetInstructions" rows="3" placeholder="例：语速稍快，语调上扬，表现出非常开心、兴奋和期待的感觉。"></textarea>
+            <div class="inline-row">
+              <label class="checkbox">
+                <input id="presetOptimize" type="checkbox" checked />
+                <span>启用 optimize_instructions</span>
+              </label>
+              <button type="button" class="ghost" id="presetInstructionExample">随机填充示例</button>
+            </div>
+            <p class="hint">仅 Instruct 系列模型支持，可描述情绪、语速、语调等。</p>
+          </div>
+
+          <div class="field">
+            <label for="presetText">合成文本</label>
+            <textarea id="presetText" rows="3" placeholder="输入要合成的文本..."></textarea>
+          </div>
+
+          <div class="field speech-rate" data-scope="preset">
+            <label for="presetSpeechRate">语速</label>
+            <div class="speech-rate-row">
+              <input id="presetSpeechRate" class="speech-rate-input" type="number" min="0.5" max="2.0" step="0.05" value="1.0" />
+              <span class="speech-rate-unit">x</span>
+              <button type="button" class="ghost speech-rate-preset" data-rate="0.75">0.75x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.0">1.0x</button>
+              <button type="button" class="ghost speech-rate-preset" data-rate="1.25">1.25x</button>
+            </div>
+            <p class="hint">范围 0.5~2.0，不改变音高。</p>
+          </div>
+
+          <button class="primary" id="presetTtsBtn">合成预设音色</button>
+
+          <div class="output">
+            <div class="status" id="presetStatus">空闲</div>
+            <div class="progress-wrap hidden" id="presetProgressWrap">
+              <div class="progress-track">
+                <div class="progress-fill" id="presetProgressBar"></div>
+              </div>
+              <div class="progress-text" id="presetProgressText">0%</div>
+            </div>
+            <audio id="presetTtsPlayer" controls></audio>
+          </div>
+        </section>
       </div>
+
+      <section class="catalog" id="voiceCatalog">
+        <details>
+          <summary>
+            <span class="catalog-title">参考音色目录</span>
+            <span class="catalog-count" id="catalogCount"></span>
+          </summary>
+          <p class="catalog-intro">
+            下列为 Qwen 系列模型内置的预设音色，可直接在上方 “预设音色 · 风格指令” 中选择。不同模型支持的音色有所差异，具体请以官方文档为准。
+          </p>
+          <div class="catalog-controls">
+            <input id="catalogSearch" type="search" placeholder="搜索：音色名、中文名、描述、方言..." />
+            <select id="catalogDialect"><option value="">全部方言</option></select>
+            <select id="catalogGender">
+              <option value="">全部性别</option>
+              <option value="女">女性</option>
+              <option value="男">男性</option>
+            </select>
+            <select id="catalogModelTag">
+              <option value="">全部模型</option>
+              <option value="instruct">Instruct</option>
+              <option value="flash">Flash</option>
+              <option value="flash-0918">Flash-0918</option>
+              <option value="classic">Classic</option>
+            </select>
+          </div>
+          <div class="catalog-grid" id="catalogGrid"></div>
+          <p class="hint catalog-empty hidden" id="catalogEmpty">没有匹配的音色。</p>
+        </details>
+      </section>
 
       <footer class="footer">
         <p>可在页面调整参数，或在 app.py 中修改默认值。</p>
       </footer>
     </div>
 
+    <script src="{{ url_for('static', filename='voices.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>
